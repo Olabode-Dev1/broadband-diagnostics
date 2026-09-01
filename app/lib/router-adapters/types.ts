@@ -82,6 +82,28 @@ export type RadioStats = {
   systemTime?: string | null;
   dialTime?: number | null;
   currentWanPriority?: string | null;
+  runtime?: {
+    uptime: string | null;
+    cpuLoad: string | null;
+    memory: string | null;
+    firmware: string | null;
+    hardwareVersion: string | null;
+  };
+  networkSettings?: {
+    mode: string | null;
+    mode5g: string | null;
+    roamingEnabled: boolean | null;
+    flightMode: boolean | null;
+    lteCarrierAggregation: boolean | null;
+    nrCarrierAggregation: boolean | null;
+  };
+  dataUsage?: {
+    limitEnabled: boolean | null;
+    limitSize: string | null;
+    cycleStart: string | null;
+    unit: string | null;
+    warningPercentage: string | null;
+  };
   routerLatencyMs: number | null;
   raw: Record<string, unknown>;
 };

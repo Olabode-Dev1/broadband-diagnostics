@@ -38,7 +38,7 @@ type RouterSessionState = {
 };
 
 const SESSION_STORAGE_KEY = "broadband-diagnostics-x17u-session";
-const AUTO_SYNC_MS = 15_000;
+const AUTO_SYNC_MS = 5_000;
 
 const sampleHistory: HistoryPoint[] = [
   {
@@ -630,7 +630,7 @@ function connectedCount(stats: RadioStats) {
 function clientCountLabel(stats: RadioStats) {
   const count = connectedCount(stats);
   if (count === null) return "Not available yet";
-  return `${count} client${count === 1 ? "" : "s"}`;
+  return `${count} router-reported device${count === 1 ? "" : "s"}`;
 }
 
 function wifiSummary(stats: RadioStats) {
@@ -1051,7 +1051,7 @@ function ClientsPanel({ stats }: { stats: RadioStats }) {
       ) : (
         <div className="mapping-empty">
           <strong>
-            {count === null ? "Device list not available yet" : `${count} clients seen`}
+            {count === null ? "Device list not available yet" : `${count} router-reported devices`}
           </strong>
           <p>
             {count === null
@@ -1125,6 +1125,56 @@ function Sparkline({
   );
 }
 
+function RouterInsights({ stats }: { stats: RadioStats }) {
+  const runtime = stats.runtime;
+  const network = stats.networkSettings;
+  const usage = stats.dataUsage;
+  const yesNo = (value: boolean | null | undefined) =>
+    value === null || value === undefined ? "Unknown" : value ? "On" : "Off";
+
+  return (
+    <section className="router-insights" aria-label="Router insights">
+      <div className="section-heading">
+        <div>
+          <span>Router insights</span>
+          <h2>More than signal bars</h2>
+        </div>
+        <p>Live settings and health reported directly by the router.</p>
+      </div>
+      <div className="insight-grid">
+        <article>
+          <span>Router health</span>
+          <strong>{runtime?.uptime ? formatDuration(runtime.uptime) : "Loading"}</strong>
+          <dl>
+            <div><dt>CPU load</dt><dd>{runtime?.cpuLoad || "Unknown"}</dd></div>
+            <div><dt>Memory</dt><dd>{runtime?.memory || "Unknown"}</dd></div>
+            <div><dt>Firmware</dt><dd>{runtime?.firmware || "Unknown"}</dd></div>
+          </dl>
+        </article>
+        <article>
+          <span>Mobile network</span>
+          <strong>{network?.mode || activeAccessLabel(stats)}</strong>
+          <dl>
+            <div><dt>5G mode</dt><dd>{network?.mode5g || "Unknown"}</dd></div>
+            <div><dt>LTE aggregation</dt><dd>{yesNo(network?.lteCarrierAggregation)}</dd></div>
+            <div><dt>5G aggregation</dt><dd>{yesNo(network?.nrCarrierAggregation)}</dd></div>
+            <div><dt>Roaming</dt><dd>{yesNo(network?.roamingEnabled)}</dd></div>
+          </dl>
+        </article>
+        <article>
+          <span>Data guard</span>
+          <strong>{usage?.limitEnabled ? "Limit enabled" : "No limit set"}</strong>
+          <dl>
+            <div><dt>Limit</dt><dd>{usage?.limitSize ? `${usage.limitSize} ${usage.unit || ""}` : "Not set"}</dd></div>
+            <div><dt>Cycle starts</dt><dd>{usage?.cycleStart || "Unknown"}</dd></div>
+            <div><dt>Warning at</dt><dd>{usage?.warningPercentage ? `${usage.warningPercentage}%` : "Not set"}</dd></div>
+          </dl>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function RawTable({ stats }: { stats: RadioStats }) {
   const rows = [
     ["RSRP", formatValue(stats.rsrp, " dBm")],
@@ -1174,7 +1224,8 @@ function RawTable({ stats }: { stats: RadioStats }) {
 
 export default function Home() {
   const [history, setHistory] = useLocalHistory();
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState(true);
+  const [hasEnteredDashboard, setHasEnteredDashboard] = useState(false);
   const [baseUrl, setBaseUrl] = useState("192.168.0.1");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
@@ -1215,18 +1266,10 @@ export default function Home() {
 
     try {
       const parsed = JSON.parse(saved) as RouterSessionState;
-      if (parsed?.sessionId && parsed?.baseUrl) {
-        setRouterSession({
-          baseUrl: parsed.baseUrl,
-          username: parsed.username || "admin",
-          sessionId: parsed.sessionId,
-          createdAt: parsed.createdAt || new Date().toISOString(),
-          lastSyncAt: parsed.lastSyncAt || null,
-        });
+      if (parsed?.baseUrl) {
         setBaseUrl(parsed.baseUrl);
         setUsername(parsed.username || "admin");
-        setAutoSync(true);
-        setStatus("Saved router login found. Live sync will resume.");
+        setStatus("Sign in to open your live dashboard.");
       }
     } catch {
       localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -1274,21 +1317,26 @@ export default function Home() {
       }
 
       try {
+        const useLocalBridge =
+          window.location.protocol === "http:" &&
+          ["localhost", "127.0.0.1"].includes(window.location.hostname);
         const response = await fetch("/api/router/x17u/snapshot", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(
             existingSession
               ? {
-                  baseUrl: existingSession.baseUrl,
-                  username: existingSession.username,
-                  sessionId: existingSession.sessionId,
+                baseUrl: existingSession.baseUrl,
+                username: existingSession.username,
+                sessionId: existingSession.sessionId,
+                useLocalBridge,
                 }
               : {
                   baseUrl: nextBaseUrl,
-                  username: nextUsername,
-                  password,
-                },
+                username: nextUsername,
+                password,
+                useLocalBridge,
+              },
           ),
         });
         const body = (await response.json()) as {
@@ -1321,6 +1369,7 @@ export default function Home() {
         if (needsLogin) {
           setPassword("");
           setAutoSync(true);
+          setHasEnteredDashboard(true);
           setStatus(`Signed in. Syncing every ${syncIntervalLabel()}.`);
         } else if (!silent) {
           setStatus(`Synced at ${shortTimeLabel(now)}.`);
@@ -1365,6 +1414,7 @@ export default function Home() {
     setRouterSession(null);
     setAutoSync(false);
     setPassword("");
+    setHasEnteredDashboard(false);
     setStatus("Live sync stopped. Sign in once to start again.");
   }
 
@@ -1402,8 +1452,56 @@ export default function Home() {
     setStatus("History trimmed to the latest reading");
   }
 
+  if (!hasEnteredDashboard) {
+    return (
+      <main className="login-page">
+        <section className="login-intro">
+          <div className="login-brand"><span>BD</span> Broadband Diagnostics</div>
+          <p className="eyebrow">Router intelligence, without the guesswork</p>
+          <h1>See what your broadband is really doing.</h1>
+          <p>
+            Sign in directly to your ZLT X17U, then get a live, technical view of
+            signal quality, bands, Wi-Fi clients, cell data and router health.
+          </p>
+          <div className="login-preview" aria-label="Dashboard features">
+            <div><b>Live signal</b><span>RSRP · RSRQ · SINR · CQI</span></div>
+            <div><b>Network detail</b><span>Bands · cell · carrier aggregation</span></div>
+            <div><b>Home network</b><span>Wi-Fi · verified clients · router health</span></div>
+          </div>
+        </section>
+
+        <section className="signin-panel" aria-label="Connect your router">
+          <div className="signin-heading">
+            <span>Step 1 of 1</span>
+            <h2>Connect your router</h2>
+            <p>Your password is used for this router session only and is never saved.</p>
+          </div>
+          <form onSubmit={refreshRouter} className="router-form">
+            <label>
+              Router address
+              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="192.168.0.1" autoComplete="url" />
+            </label>
+            <label>
+              Username
+              <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="admin" autoComplete="username" />
+            </label>
+            <label>
+              Router password
+              <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Router password" type="password" autoComplete="current-password" />
+            </label>
+            <button className="primary-button" disabled={isLoading || !password}>
+              {isLoading ? "Connecting securely..." : "Open live dashboard"}
+            </button>
+          </form>
+          <p className="status-line" role="status">{status}</p>
+          <p className="signin-footnote">Once connected, the dashboard refreshes every 5 seconds. You can stop it at any time.</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="console-shell">
+    <main className="dashboard-page">
       <aside className="side-rail">
         <div className="brand-block">
           <div className="brand-mark">BD</div>
@@ -1432,11 +1530,11 @@ export default function Home() {
         </div>
       </aside>
 
-      <div className="workspace">
-        <header className="topbar">
+      <div className="dashboard-content">
+        <header className="topbar product-header">
           <div>
-            <span className="eyebrow">Router console</span>
-            <h1>Broadband health</h1>
+            <span className="eyebrow">Your home internet</span>
+            <h1>Broadband health, at a glance</h1>
             <p>
               {accessLabel} on {stats.operator}. {carriers || "Unknown"} carrier
               {carriers === 1 ? "" : "s"} · {spectrumLabel} · {clientLabel}.
@@ -1448,7 +1546,7 @@ export default function Home() {
               className={advanced ? "mode-button active" : "mode-button"}
               onClick={() => setAdvanced((value) => !value)}
             >
-              {advanced ? "Advanced mode on" : "Advanced mode"}
+              {advanced ? "Hide technical data" : "Show technical data"}
             </button>
           </div>
         </header>
@@ -1688,6 +1786,8 @@ export default function Home() {
           <WifiPanel stats={stats} />
           <ClientsPanel stats={stats} />
         </section>
+
+        <RouterInsights stats={stats} />
 
         <section className="split-layout" id="diagnosis">
           <section className="surface-block">

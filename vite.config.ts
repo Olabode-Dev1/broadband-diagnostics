@@ -47,6 +47,16 @@ export default defineConfig(async () => {
     server: {
       // Allow a laptop on the same local network to open the development dashboard.
       host: true,
+      // The Cloudflare worker runtime can drop private-network requests on
+      // Windows. In development, send the router call through Vite's native
+      // local proxy instead. This route does not exist in a deployed site.
+      proxy: {
+        "/__router_bridge": {
+          target: "http://192.168.0.1",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/__router_bridge/, ""),
+        },
+      },
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),

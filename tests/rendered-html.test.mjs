@@ -23,7 +23,7 @@ async function render() {
   );
 }
 
-test("server-renders the broadband diagnostics dashboard", async () => {
+test("server-renders the broadband diagnostics sign-in screen", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -32,19 +32,12 @@ test("server-renders the broadband diagnostics dashboard", async () => {
   assert.match(html, /Broadband Diagnostics/i);
   assert.match(html, /MTN and Airtel broadband diagnostics/i);
   assert.match(html, /ZLT X17U/i);
-  assert.match(html, /Broadband health/i);
-  assert.match(html, /What you are using now/i);
-  assert.match(html, /Current connection/i);
-  assert.match(html, /5G state/i);
-  assert.match(html, /Wi-Fi settings/i);
-  assert.match(html, /Connected devices/i);
-  assert.match(html, /Signal map/i);
-  assert.match(html, /How your internet is connected/i);
-  assert.match(html, /Sign in once/i);
-  assert.match(html, /Auto-sync/i);
-  assert.match(html, /channels joined/i);
-  assert.match(html, /Most likely cause/i);
-  assert.match(html, /Advanced mode/i);
+  assert.match(html, /Connect your router/i);
+  assert.match(html, /Router password/i);
+  assert.match(html, /Open live dashboard/i);
+  assert.match(html, /router session only/i);
+  assert.match(html, /every 5 seconds/i);
+  assert.match(html, /RSRP.*RSRQ.*SINR.*CQI/i);
   assert.doesNotMatch(html, /Sylva|living world|inner-green|ecostove|ethos/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|SkeletonPreview/i);
 });
@@ -82,6 +75,9 @@ test("keeps adapter boundaries and product metadata in source", async () => {
   assert.match(adapter, /cmd:\s*232/);
   assert.match(adapter, /cmd:\s*100/);
   assert.match(adapter, /cmd:\s*205/);
+  assert.match(adapter, /cmd:\s*223/);
+  assert.match(adapter, /cmd:\s*224/);
+  assert.match(adapter, /cmd:\s*225/);
   assert.match(adapter, /cmd:\s*80/);
   assert.match(adapter, /readX17USnapshotWithSession/);
   assert.match(adapter, /station_list/);

@@ -300,6 +300,7 @@ async function readLegacyZltSnapshot(baseUrl: string) {
 async function readAuthenticatedX17UDetails(baseUrl: string, sessionId: string) {
   const probes: Record<string, RouterPayload> = {
     systemStatus: { cmd: 113, method: "GET", sessionId },
+    runtime: { cmd: 207, method: "GET", sessionId },
     ipInfo: { cmd: 133, method: "GET", sessionId },
     dhcpInfo: { cmd: 208, method: "GET", sessionId },
     equipment: { cmd: 104, method: "GET", sessionId },
@@ -308,8 +309,12 @@ async function readAuthenticatedX17UDetails(baseUrl: string, sessionId: string) 
     wifi5: { cmd: 211, method: "GET", subcmd: 0, sessionId },
     wifi24Setup: { cmd: 230, method: "GET", subcmd: 0, sessionId },
     wifi5Setup: { cmd: 231, method: "GET", subcmd: 0, sessionId },
+    wifiAdvanced: { cmd: 410, method: "GET", subcmd: "0", sessionId },
+    allDevices: { cmd: 223, method: "GET", sessionId },
     wifi24Clients: { cmd: 224, method: "GET", sessionId },
     wifi5Clients: { cmd: 225, method: "GET", sessionId },
+    networkMode: { cmd: 218, method: "GET", sessionId },
+    dataUsage: { cmd: 337, method: "GET", sessionId },
   };
 
   const entries = await Promise.all(
@@ -463,6 +468,7 @@ function parseConnectedDevices(sources: unknown[]) {
         "equipmentList",
         "terminal_list",
         "terminalList",
+        "dhcp_list_info",
         "dhcp_clients",
         "dhcpClientList",
         "online_clients",
@@ -716,7 +722,12 @@ function normalizeStats(
   const bands = splitList(raw.currentband ?? raw.band ?? raw.bands).map(normalizeBand);
   const bandwidthMHz = splitNumbers(raw.bandwidth ?? raw.band_width ?? raw.bw);
   const earfcn = splitList(raw.FREQ ?? raw.freq ?? raw.earfcn);
-  const connectedDevices = parseConnectedDevices(sources);
+  // The router's own UI uses cmd 223 for the actual device table. On the
+  // connected X17U this returns `dhcp_list_info`; commands 224 and 225 return
+  // the separate `wlan24g_wifi_info` / `wlan5g_wifi_info` count payloads.
+  // Keeping those responsibilities separate prevents counts from being
+  // mistaken for a list.
+  const connectedDevices = parseConnectedDevices([probes.allDevices]);
   const wifi24Count = pickNumber([probes.wifi24Clients], [
     "sta_count",
     "station_count",
@@ -742,14 +753,7 @@ function normalizeStats(
       ? (wifi24Count ?? 0) + (wifi5Count ?? 0)
       : null;
   const connectedDeviceCount =
-    pickNumber(sources, [
-      "sta_count",
-      "station_count",
-      "client_count",
-      "wifi_user_num",
-      "online_device_num",
-      "online_num",
-    ]) ?? summedWifiCount ?? (connectedDevices.length ? connectedDevices.length : null);
+    summedWifiCount ?? (connectedDevices.length ? connectedDevices.length : null);
   const wifiNetworks = parseWifiNetworks(sources, connectedDeviceCount, probes);
   const basicDeviceModel = pickString(sources, [
     "board_type",
@@ -757,6 +761,9 @@ function normalizeStats(
     "model",
     "product_model",
   ]);
+  const runtimeSource = probes.runtime ? [probes.runtime] : [];
+  const networkModeSource = probes.networkMode ? [probes.networkMode] : [];
+  const dataUsageSource = probes.dataUsage ? [probes.dataUsage] : [];
 
   return {
     capturedAt: new Date().toISOString(),
@@ -825,6 +832,39 @@ function normalizeStats(
     systemTime: pickString(sources, ["systime", "system_time", "sys_time"]),
     dialTime: pickNumber(sources, ["dial_time"]),
     currentWanPriority: pickString(sources, ["current_real_wan_prio", "wan_priority"]),
+    runtime: {
+      uptime: pickString(runtimeSource, ["uptime"]),
+      cpuLoad: pickString(runtimeSource, ["cpuload", "cpu_load"]),
+      memory: pickString(runtimeSource, ["memory", "mem"]),
+      firmware: pickString(runtimeSource, ["real_fwversion", "firmware", "fwversion"]),
+      hardwareVersion: pickString(runtimeSource, ["hwversion", "hardware_version"]),
+    },
+    networkSettings: {
+      mode: pickString(networkModeSource, ["networkMode", "network_mode"]),
+      mode5g: pickString(networkModeSource, ["mode5g", "mode_5g"]),
+      roamingEnabled: enabledFrom(
+        pickString(networkModeSource, ["roamingEnable", "roaming_enable"]),
+      ),
+      flightMode: enabledFrom(
+        pickString(networkModeSource, ["flightMode", "flight_mode"]),
+      ),
+      lteCarrierAggregation: enabledFrom(
+        pickString(networkModeSource, ["lteCA", "lte_ca"]),
+      ),
+      nrCarrierAggregation: enabledFrom(
+        pickString(networkModeSource, ["nrCA", "nr_ca"]),
+      ),
+    },
+    dataUsage: {
+      limitEnabled: enabledFrom(pickString(dataUsageSource, ["limitSwitch", "limit_switch"])),
+      limitSize: pickString(dataUsageSource, ["limitSize", "limit_size"]),
+      cycleStart: pickString(dataUsageSource, ["startDate", "start_date"]),
+      unit: pickString(dataUsageSource, ["flow_limit_unit", "unit"]),
+      warningPercentage: pickString(dataUsageSource, [
+        "warn_percentage",
+        "nation_warn_percentage",
+      ]),
+    },
     routerLatencyMs,
     raw: {
       status: raw,
